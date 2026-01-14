@@ -1,0 +1,205 @@
+name: Production Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  # 1. Job para calcular a versão
+  versioning:
+    if: github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'dev'
+    runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.tag_version.outputs.new_tag }}
+      changelog: ${{ steps.tag_version.outputs.changelog }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+          release_branches: main
+
+  # 2. Build para Windows (Mantido igual)
+  build-windows:
+    needs: versioning
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install Python dependencies & Build Exe
+        run: |
+          pip install -r assets/python/requirements.txt
+          pip install pyinstaller
+          pyinstaller --onefile --noconsole --distpath assets/python --name omr_worker assets/python/omr_worker.py
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          cache: true
+
+      - name: Update pubspec version
+        run: |
+          $VERSION = "${{ needs.versioning.outputs.new_tag }}".Substring(1)
+          sed -i "s/^version: .*/version: $VERSION/" pubspec.yaml
+        shell: powershell
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Build Windows Release
+        run: flutter build windows --release
+
+      - name: Compress Build
+        run: |
+          cd build/windows/x64/runner/Release
+          compress-archive -Path * -DestinationPath ..\..\..\..\..\corretor_windows_${{ needs.versioning.outputs.new_tag }}.zip
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: corretor_windows_${{ needs.versioning.outputs.new_tag }}.zip
+
+  # 3. Build para Linux (Gerando AppImage)
+  build-linux:
+    needs: versioning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+
+      - name: Setup Python & Build Binary
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Build Python Worker
+        run: |
+          pip install -r assets/python/requirements.txt
+          pip install pyinstaller
+          pyinstaller --onefile --noconsole --distpath assets/python --name omr_worker assets/python/omr_worker.py
+          chmod +x assets/python/omr_worker
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          cache: true
+
+      - name: Update pubspec version
+        run: |
+          VERSION=${{ needs.versioning.outputs.new_tag }}
+          VERSION=${VERSION#v}
+          sed -i "s/^version: .*/version: $VERSION/" pubspec.yaml
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Build Linux Release
+        run: flutter build linux --release
+
+      # --- CRIAÇÃO DO APPIMAGE ---
+      - name: Package as AppImage
+        run: |
+          # Criar estrutura do diretório AppDir
+          mkdir -p AppDir
+
+          # Copiar o bundle gerado pelo Flutter para dentro do AppDir
+          # O conteúdo vai para a raiz do AppDir para simplificar o AppRun
+          cp -r build/linux/x64/release/bundle/* AppDir/
+
+          # Preparar Ícone (Usando o logo do SESI que você tem nos assets)
+          cp assets/images/sesi-logo.png AppDir/corretor_desktop.png
+
+          # Criar o arquivo .desktop dinamicamente
+          # Importante: O nome do executável gerado pelo Flutter é baseado no 'name' do pubspec.yaml (corretor_desktop)
+          cat > AppDir/corretor_desktop.desktop <<EOF
+          [Desktop Entry]
+          Name=Corretor Desktop
+          Exec=corretor_desktop
+          Icon=corretor_desktop
+          Type=Application
+          Categories=Utility;Education;
+          Comment=Corretor Automático de Provas
+          EOF
+
+          # Criar link simbólico para o AppRun (Ponto de entrada do AppImage)
+          cd AppDir
+          ln -s corretor_desktop AppRun
+          cd ..
+
+          # Baixar o appimagetool (ferramenta que cria o binário final)
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+
+          # Extrair e rodar (evita problemas com FUSE no ambiente do GitHub Actions)
+          ./appimagetool-x86_64.AppImage --appimage-extract
+
+          # Gerar o AppImage final usando o nome da versão
+          ./squashfs-root/AppRun AppDir "corretor_linux_${{ needs.versioning.outputs.new_tag }}.AppImage"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: "*.AppImage"
+
+  # 4. Criar a Release no GitHub
+  create-release:
+    needs: [versioning, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*-build"
+          merge-multiple: true
+          path: artifacts
+
+      - name: Generate Release Body
+        id: release_body
+        run: |
+          echo "BODY<<EOF" >> $GITHUB_OUTPUT
+          echo "## 🚀 Alterações na versão ${{ needs.versioning.outputs.new_tag }}" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "**PR:** ${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### 📝 Notas:" >> $GITHUB_OUTPUT
+          echo "${{ github.event.pull_request.body }}" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "---" >> $GITHUB_OUTPUT
+          echo "_Build gerada automaticamente via GitHub Actions_" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.versioning.outputs.new_tag }}
+          name: Release ${{ needs.versioning.outputs.new_tag }}
+          body: ${{ steps.release_body.outputs.BODY }}
+          draft: false
+          prerelease: false
+          files: artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
