@@ -10,6 +10,7 @@ permissions:
   contents: write
 
 jobs:
+  # 1. Versionamento Automático
   versioning:
     if: github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'dev'
     runs-on: ubuntu-latest
@@ -28,47 +29,45 @@ jobs:
           default_bump: patch
           release_branches: main
 
+  # 2. Build Windows
   build-windows:
     needs: versioning
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-          cache: "pip"
-      - name: Install Python dependencies & Build Exe
-        # No Windows o limite de 4GB é mais difícil de atingir ou o onefile lida melhor,
-        # mas adicionamos exclusões para economizar espaço
-        run: |
-          pip install -r assets/python/requirements.txt
-          pip install pyinstaller
-          pyinstaller --onefile --noconsole --distpath assets/python --name omr_worker --exclude-module tensorboard --exclude-module notebook --exclude-module matplotlib.tests assets/python/omr_worker.py
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: "stable"
           cache: true
+
       - name: Update pubspec version
         run: |
           $VERSION = "${{ needs.versioning.outputs.new_tag }}".Substring(1)
           sed -i "s/^version: .*/version: $VERSION/" pubspec.yaml
         shell: powershell
+
       - name: Get Dependencies
         run: flutter pub get
+
+      # O Flutter vai copiar automaticamente a pasta assets/python e assets/models
+      # para dentro de build/windows/x64/runner/Release/data/flutter_assets/
       - name: Build Windows Release
         run: flutter build windows --release
+
       - name: Compress Build
         run: |
           cd build/windows/x64/runner/Release
           compress-archive -Path * -DestinationPath ..\..\..\..\..\corretor_windows_${{ needs.versioning.outputs.new_tag }}.zip
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
           path: corretor_windows_${{ needs.versioning.outputs.new_tag }}.zip
 
+  # 3. Build Linux (AppImage)
   build-linux:
     needs: versioning
     runs-on: ubuntu-latest
@@ -78,45 +77,7 @@ jobs:
       - name: Install Linux Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev fuse
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-          cache: "pip"
-
-      - name: Build Python Worker (Onedir Mode)
-        # AQUI ESTÁ A CORREÇÃO:
-        # 1. Usamos --onedir para evitar o limite de 4GB do PyInstaller
-        # 2. Criamos um script wrapper para que o Flutter continue chamando 'assets/python/omr_worker'
-        run: |
-          pip install -r assets/python/requirements.txt
-          pip install pyinstaller
-
-          # Compila em modo diretório para 'assets/python/omr_dist'
-          # Excluímos módulos pesados e inúteis para inferência (tensorboard, notebook)
-          pyinstaller --onedir --noconsole --clean \
-            --distpath assets/python \
-            --name omr_dist \
-            --contents-directory libs \
-            --exclude-module tensorboard \
-            --exclude-module notebook \
-            --exclude-module share \
-            assets/python/omr_worker.py
-
-          # Cria o script wrapper que o Flutter vai executar
-          # Esse script entra na pasta omr_dist e executa o binário real
-          echo '#!/bin/bash' > assets/python/omr_worker
-          echo 'DIR="$(dirname "$(readlink -f "$0")")"' >> assets/python/omr_worker
-          echo 'export LD_LIBRARY_PATH="$DIR/omr_dist:$LD_LIBRARY_PATH"' >> assets/python/omr_worker
-          echo '"$DIR/omr_dist/omr_dist" "$@"' >> assets/python/omr_worker
-
-          chmod +x assets/python/omr_worker
-
-          # Remove o script original .py e arquivos temporários para não ir no pacote final
-          rm assets/python/omr_worker.py
-          rm -rf build/omr_dist
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -136,10 +97,16 @@ jobs:
       - name: Build Linux Release
         run: flutter build linux --release
 
+      # Empacotamento AppImage
       - name: Package as AppImage
         run: |
+          # Cria estrutura
           mkdir -p AppDir
+
+          # Copia o bundle gerado pelo Flutter (inclui assets/python dentro de data/flutter_assets)
           cp -r build/linux/x64/release/bundle/* AppDir/
+
+          # Configura ícone e metadados
           cp assets/images/sesi-logo.png AppDir/corretor_desktop.png
 
           cat > AppDir/corretor_desktop.desktop <<EOF
@@ -152,15 +119,16 @@ jobs:
           Comment=Corretor Automático de Provas
           EOF
 
+          # Link simbólico para execução
           cd AppDir
           ln -s corretor_desktop AppRun
           cd ..
 
+          # Gera o AppImage
           wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool-x86_64.AppImage
           ./appimagetool-x86_64.AppImage --appimage-extract
 
-          # A variável ARCH costuma ser necessária para o appimagetool
           ARCH=x86_64 ./squashfs-root/AppRun AppDir "corretor_linux_${{ needs.versioning.outputs.new_tag }}.AppImage"
 
       - name: Upload Artifact
@@ -169,6 +137,7 @@ jobs:
           name: linux-build
           path: "*.AppImage"
 
+  # 4. Criar Release no GitHub
   create-release:
     needs: [versioning, build-windows, build-linux]
     runs-on: ubuntu-latest
@@ -183,15 +152,14 @@ jobs:
         id: release_body
         run: |
           echo "BODY<<EOF" >> $GITHUB_OUTPUT
-          echo "## 🚀 Alterações na versão ${{ needs.versioning.outputs.new_tag }}" >> $GITHUB_OUTPUT
+          echo "## 🚀 Nova Versão Disponível: ${{ needs.versioning.outputs.new_tag }}" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
-          echo "**PR:** ${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
+          echo "**Alterações:** ${{ github.event.pull_request.title }}" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
-          echo "### 📝 Notas:" >> $GITHUB_OUTPUT
           echo "${{ github.event.pull_request.body }}" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
           echo "---" >> $GITHUB_OUTPUT
-          echo "_Build gerada automaticamente via GitHub Actions_" >> $GITHUB_OUTPUT
+          echo "*Nota: O Python será configurado automaticamente na primeira execução do software.*" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Release

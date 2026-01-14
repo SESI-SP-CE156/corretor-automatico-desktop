@@ -11,7 +11,21 @@ class PythonService {
   static String? _cachedVenvPython;
   static Future<void>? _initTask;
 
-  final String scriptPath = 'assets/python/omr_worker.py';
+  String get _scriptPath {
+    if (kDebugMode) {
+      return 'assets/python/omr_worker.py';
+    } else {
+      // Ajuste para estrutura de Release do Flutter Desktop
+      return p.join(
+        p.dirname(Platform.resolvedExecutable),
+        'data',
+        'flutter_assets',
+        'assets',
+        'python',
+        'omr_worker.py',
+      );
+    }
+  }
 
   Future<void> initialize() {
     _initTask ??= _setupVenvAndRequirements();
@@ -196,7 +210,7 @@ class PythonService {
       };
 
       final process = await Process.start(executable, [
-        scriptPath,
+        _scriptPath,
       ], runInShell: Platform.isWindows);
 
       final stdoutBuffer = StringBuffer();
