@@ -339,7 +339,7 @@ def processar_prova(imagem_path, layout_config, gabarito_correto, model_paths):
                 if letra_aluno != letra_gabarito:
                     l_idx_gab = letras.index(letra_gabarito)
                     x_pos_gab = int(ox + (l_idx_gab * espaco_h))
-                    cv2.circle(img_out, (x_pos_gab, y_pos), 10, (255, 0, 0), 2)
+                    cv2.circle(img_out, (x_pos_gab, y_pos), 10, (120, 120, 120), 2)
 
     out_path = os.path.join(os.path.dirname(imagem_path), f"checked_{os.path.basename(imagem_path)}")
     cv2.imwrite(out_path, img_out)
