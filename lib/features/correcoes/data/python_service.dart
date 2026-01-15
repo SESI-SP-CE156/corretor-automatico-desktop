@@ -7,9 +7,30 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+class PythonSetupState {
+  final String message;
+  final double progress; // 0.0 a 1.0
+  final bool hasError;
+
+  const PythonSetupState({
+    required this.message,
+    required this.progress,
+    this.hasError = false,
+  });
+}
+
 class PythonService {
+  static final PythonService _instance = PythonService._internal();
+  factory PythonService() => _instance;
+  PythonService._internal();
+
   static String? _cachedVenvPython;
-  static Future<void>? _initTask;
+
+  final ValueNotifier<PythonSetupState> stateNotifier = ValueNotifier(
+    const PythonSetupState(message: 'Aguardando início...', progress: 0.0),
+  );
+
+  bool _isInitialized = false;
 
   String get _scriptPath {
     if (kDebugMode) {
@@ -27,9 +48,31 @@ class PythonService {
     }
   }
 
-  Future<void> initialize() {
-    _initTask ??= _setupVenvAndRequirements();
-    return _initTask!;
+  Future<void> initialize() async {
+    if (_isInitialized) {
+      stateNotifier.value = const PythonSetupState(
+        message: 'Pronto',
+        progress: 1.0,
+      );
+      return;
+    }
+
+    try {
+      await _setupVenvAndRequirements();
+      _isInitialized = true;
+      stateNotifier.value = const PythonSetupState(
+        message: 'Inicialização concluída!',
+        progress: 1.0,
+      );
+    } catch (e) {
+      stateNotifier.value = PythonSetupState(
+        message: 'Erro na configuração: $e',
+        progress: 0.0,
+        hasError: true,
+      );
+      debugPrint('Erro crítico no setup Python: $e');
+      rethrow;
+    }
   }
 
   Future<String> get _venvDirectory async {
@@ -57,6 +100,11 @@ class PythonService {
     return _cachedVenvPython!;
   }
 
+  void _updateStatus(String msg, double progress) {
+    stateNotifier.value = PythonSetupState(message: msg, progress: progress);
+    debugPrint('[PythonService] $msg');
+  }
+
   Future<String> _findSystemPython() async {
     List<String> candidates;
     if (Platform.isWindows) {
@@ -64,6 +112,8 @@ class PythonService {
     } else {
       candidates = ['python3.11', 'python3.12', 'python3.10', 'python3'];
     }
+
+    _updateStatus('Procurando Python no sistema...', 0.1);
 
     for (final cmd in candidates) {
       try {
@@ -78,7 +128,9 @@ class PythonService {
         continue;
       }
     }
-    throw Exception('Nenhum Python compatível encontrado no sistema.');
+    throw Exception(
+      'Nenhum Python compatível encontrado. Instale o Python 3.10+.',
+    );
   }
 
   Future<void> _createVenvParams(
@@ -89,6 +141,7 @@ class PythonService {
     final parts = systemPythonCmd.split(' ');
     final executable = parts[0];
     final prefixArgs = parts.length > 1 ? parts.sublist(1) : <String>[];
+
     final result = await Process.run(executable, [
       ...prefixArgs,
       '-m',
@@ -96,8 +149,9 @@ class PythonService {
       venvPath,
       '--clear',
     ]);
-    if (result.exitCode != 0)
+    if (result.exitCode != 0) {
       throw Exception('Falha ao criar venv: ${result.stderr}');
+    }
   }
 
   Future<int> _runPip(String pythonExe, List<String> args) async {
@@ -112,53 +166,61 @@ class PythonService {
   }
 
   Future<void> _setupVenvAndRequirements() async {
-    try {
-      final venvPython = await _venvPythonExecutable;
-      final venvDir = await _venvDirectory;
-      final venvFile = File(venvPython);
+    final venvPython = await _venvPythonExecutable;
+    final venvDir = await _venvDirectory;
+    final venvFile = File(venvPython);
 
-      if (!await venvFile.exists()) {
-        final systemPython = await _findSystemPython();
-        await _createVenvParams(systemPython, venvDir);
-      }
+    // 1. Verificar/Criar VENV
+    if (!await venvFile.exists()) {
+      final systemPython = await _findSystemPython();
+      _updateStatus('Criando ambiente virtual (venv)...', 0.2);
+      await _createVenvParams(systemPython, venvDir);
+    }
 
-      if (!Platform.isMacOS) {
-        await _runPip(venvPython, [
-          'install',
-          'torch',
-          'torchvision',
-          '--index-url',
-          'https://download.pytorch.org/whl/cpu',
-          '--no-cache-dir',
-        ]);
-      }
-
-      final String requirementsContent = await rootBundle.loadString(
-        'assets/python/requirements.txt',
-      );
-      final Directory tempDir = await getTemporaryDirectory();
-      final File tempRequirementsFile = File(
-        p.join(tempDir.path, 'requirements_temp.txt'),
-      );
-      await tempRequirementsFile.writeAsString(requirementsContent);
-
+    // 2. Instalar PyTorch (Pesado)
+    if (!Platform.isMacOS) {
+      _updateStatus('Baixando bibliotecas de IA (Isso pode demorar)...', 0.4);
       await _runPip(venvPython, [
         'install',
-        '-r',
-        tempRequirementsFile.path,
-        '--disable-pip-version-check',
-        '--no-warn-script-location',
+        'torch',
+        'torchvision',
+        '--index-url',
+        'https://download.pytorch.org/whl/cpu',
         '--no-cache-dir',
       ]);
-
-      if (await tempRequirementsFile.exists())
-        await tempRequirementsFile.delete();
-      debugPrint('✅ Ambiente Python configurado.');
-    } catch (e) {
-      debugPrint('Erro crítico no setup Python: $e');
-      _initTask = null;
-      rethrow;
     }
+
+    // 3. Instalar Requirements.txt
+    _updateStatus('Instalando dependências auxiliares...', 0.7);
+
+    final String requirementsContent = await rootBundle.loadString(
+      'assets/python/requirements.txt',
+    );
+    final Directory tempDir = await getTemporaryDirectory();
+    final File tempRequirementsFile = File(
+      p.join(tempDir.path, 'requirements_temp.txt'),
+    );
+    await tempRequirementsFile.writeAsString(requirementsContent);
+
+    await _runPip(venvPython, [
+      'install',
+      '-r',
+      tempRequirementsFile.path,
+      '--disable-pip-version-check',
+      '--no-warn-script-location',
+      '--no-cache-dir',
+    ]);
+
+    if (await tempRequirementsFile.exists()) {
+      await tempRequirementsFile.delete();
+    }
+
+    // 4. Extrair Modelos (Labels, YOLO, Keras)
+    _updateStatus('Configurando modelos de IA...', 0.9);
+    // (O método corrigirProva faz a extração, mas podemos pré-extrair aqui se quiser,
+    // ou deixar como está e considerar 100% após o pip)
+
+    _updateStatus('Ambiente configurado!', 1.0);
   }
 
   Future<String> _extractAsset(String assetPath, String targetFilename) async {

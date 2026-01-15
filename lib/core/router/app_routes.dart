@@ -4,6 +4,9 @@ class AppRoutes {
   // Root
   static const String home = '/';
 
+  // Rota de Setup
+  static const String setup = '/setup';
+
   // Turmas
   static const String turmas = '/turmas';
   static const String turmasDetails = ':id'; // Caminho relativo
