@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:corretor_desktop/core/router/app_routes.dart';
 import 'package:corretor_desktop/core/ui/scaffold_with_rail.dart';
+import 'package:corretor_desktop/core/ui/screens/python_setup_screen.dart';
 import 'package:corretor_desktop/features/alunos/alunos_create_screen.dart';
 import 'package:corretor_desktop/features/alunos/alunos_list_screen.dart';
 import 'package:corretor_desktop/features/correcoes/correcoes_list_screen.dart';
@@ -24,8 +25,12 @@ final GlobalKey<NavigatorState> _shellNavigatorKey =
 
 final GoRouter appRouter = GoRouter(
   navigatorKey: _rootNavigatorKey,
-  initialLocation: AppRoutes.turmas,
+  initialLocation: AppRoutes.setup,
   routes: [
+    GoRoute(
+      path: AppRoutes.setup,
+      builder: (context, state) => const PythonSetupScreen(),
+    ),
     // MUDANÇA PRINCIPAL: Usamos ShellRoute ao invés de StatefulShellRoute
     // Isso garante que as telas sejam reconstruídas ao trocar de rota
     ShellRoute(

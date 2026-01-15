@@ -1,7 +1,6 @@
 // lib/main.dart
 
 import 'package:corretor_desktop/core/router/app_router.dart';
-import 'package:corretor_desktop/features/correcoes/data/python_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -35,7 +34,7 @@ Future<void> main() async {
     // --- MUDANÇA AQUI: Sem 'await' ---
     // Inicia a configuração do Python em background (fire-and-forget).
     // O PythonService gerencia o estado internamente.
-    PythonService().initialize();
+    // PythonService().initialize();
     // ---------------------------------
   } catch (e) {
     debugPrint('Exception durante inicialização: $e');
