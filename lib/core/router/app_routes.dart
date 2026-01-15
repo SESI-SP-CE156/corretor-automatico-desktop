@@ -28,6 +28,7 @@ class AppRoutes {
   static const String correcoes = '/correcoes';
   static const String correcoesScanner = 'scanner';
   static const String correcoesReview = 'review';
+  static const String correcoesDetails = 'details/:id';
 
   // Matérias (Sugestão baseada no diagrama)
   static const String materias = '/materias';

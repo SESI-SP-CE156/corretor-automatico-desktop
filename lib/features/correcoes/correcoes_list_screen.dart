@@ -179,7 +179,9 @@ class _CorrecoesListScreenState extends State<CorrecoesListScreen> {
                       return CorrecaoCard(
                         correcao: item,
                         onTap: () {
-                          // Futuro: Navegar para detalhes da correção
+                          context.push(
+                            '${AppRoutes.correcoes}/details/${item.gabaritoId}',
+                          );
                         },
                         onDelete: () => _deleteCorrecao(item),
                       );

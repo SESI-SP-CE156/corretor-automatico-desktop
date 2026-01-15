@@ -31,7 +31,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 10,
+      version: 12,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
       onConfigure: (db) async {
@@ -144,6 +144,8 @@ class DatabaseHelper {
       CREATE TABLE NOTAS (
         NOT_ID INTEGER PRIMARY KEY AUTOINCREMENT,
         NOT_NOTA REAL,
+        NOT_CAMINHO_IMAGEM TEXT,
+        NOT_CAMINHO_CORRIGIDA TEXT,
         FK_ALUNOS_ALU_ID INTEGER,
         FK_MATERIAS_MAT_ID TEXT,
         FK_PROVAS_PRO_ID INTEGER,
@@ -161,6 +163,16 @@ class DatabaseHelper {
         RNO_NOTA REAL,
         FK_GABARITOS_GAB_ID INTEGER, -- Agora aponta para Gabarito
         FOREIGN KEY (FK_GABARITOS_GAB_ID) REFERENCES GABARITOS (GAB_ID) ON DELETE CASCADE
+      );
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS RESPOSTAS_ALUNOS (
+        RES_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+        FK_PROVAS_PRO_ID INTEGER,
+        RES_NUMERO_QUESTAO INTEGER,
+        RES_RESPOSTA TEXT,
+        FOREIGN KEY (FK_PROVAS_PRO_ID) REFERENCES PROVAS (PRO_ID) ON DELETE CASCADE
       );
     ''');
 
@@ -352,6 +364,44 @@ class DatabaseHelper {
       // Tenta migrar dados antigos assumindo ordem sequencial (ALG_ID)
       // Como o SQLite antigo é limitado, faremos uma lógica simples:
       // Dados antigos continuarão com NULL e trataremos isso no código (fallback para índice sequencial)
+    }
+
+    if (oldVersion < 11) {
+      print(
+        'Migração v11: Criando tabela de respostas e adicionando caminho da imagem...',
+      );
+
+      // 1. Tabela para salvar o que o aluno marcou em cada questão
+      await db.execute('''
+        CREATE TABLE RESPOSTAS_ALUNOS (
+          RES_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+          FK_PROVAS_PRO_ID INTEGER,
+          RES_NUMERO_QUESTAO INTEGER,
+          RES_RESPOSTA TEXT,
+          FOREIGN KEY (FK_PROVAS_PRO_ID) REFERENCES PROVAS (PRO_ID) ON DELETE CASCADE
+        );
+      ''');
+
+      // 2. Coluna para salvar o caminho do arquivo de imagem (para download posterior)
+      // Verifica se a coluna já existe antes de adicionar (boa prática em SQLite)
+      try {
+        await db.execute(
+          'ALTER TABLE NOTAS ADD COLUMN NOT_CAMINHO_IMAGEM TEXT',
+        );
+      } catch (e) {
+        print('Coluna NOT_CAMINHO_IMAGEM provavelmente já existe: $e');
+      }
+    }
+
+    if (oldVersion < 12) {
+      print('Migração v12: Adicionando coluna para imagem corrigida...');
+      try {
+        await db.execute(
+          'ALTER TABLE NOTAS ADD COLUMN NOT_CAMINHO_CORRIGIDA TEXT',
+        );
+      } catch (e) {
+        print('Erro ou coluna já existe: $e');
+      }
     }
   }
 

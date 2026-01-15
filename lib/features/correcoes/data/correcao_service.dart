@@ -190,6 +190,9 @@ class CorrecaoService {
     required int alunoId,
     required int gabaritoId,
     required double nota,
+    required Map<int, String> respostasAluno,
+    required String caminhoImagem,
+    required String caminhoImagemCorrigida,
   }) async {
     final db = await _db;
 
@@ -203,41 +206,62 @@ class CorrecaoService {
       final materiaId = gabData.first['FK_MATERIAS_MAT_ID'];
 
       int? provaId;
-      final provas = await txn.query(
-        'PROVAS',
-        where: 'FK_GABARITOS_GAB_ID = ?',
-        whereArgs: [gabaritoId],
-        limit: 1,
-      );
 
-      if (provas.isNotEmpty) {
-        provaId = provas.first['PRO_ID'] as int;
+      final checkNota = await txn.rawQuery(
+        '''
+        SELECT N.NOT_ID, P.PRO_ID 
+        FROM NOTAS N
+        INNER JOIN PROVAS P ON N.FK_PROVAS_PRO_ID = P.PRO_ID
+        WHERE N.FK_ALUNOS_ALU_ID = ? AND P.FK_GABARITOS_GAB_ID = ?
+      ''',
+        [alunoId, gabaritoId],
+      );
+      if (checkNota.isNotEmpty) {
+        provaId = checkNota.first['PRO_ID'] as int;
+        final notaId = checkNota.first['NOT_ID'] as int;
+
+        // Atualiza Nota e Caminho
+        await txn.update(
+          'NOTAS',
+          {
+            'NOT_NOTA': nota,
+            'NOT_CAMINHO_IMAGEM': caminhoImagem,
+            'NOT_CAMINHO_CORRIGIDA': caminhoImagemCorrigida, // Update field
+          },
+          where: 'NOT_ID = ?',
+          whereArgs: [notaId],
+        );
+
+        // Limpa respostas antigas para re-inserir
+        await txn.delete(
+          'RESPOSTAS_ALUNOS',
+          where: 'FK_PROVAS_PRO_ID = ?',
+          whereArgs: [provaId],
+        );
       } else {
+        // Cria Nova Prova
         provaId = await txn.insert('PROVAS', {
           'FK_GABARITOS_GAB_ID': gabaritoId,
           'FK_FOLHAS_MODELO_FOM_ID': folhaId,
         });
-      }
 
-      final notasAntigas = await txn.query(
-        'NOTAS',
-        where: 'FK_ALUNOS_ALU_ID = ? AND FK_PROVAS_PRO_ID = ?',
-        whereArgs: [alunoId, provaId],
-      );
-
-      if (notasAntigas.isNotEmpty) {
-        await txn.update(
-          'NOTAS',
-          {'NOT_NOTA': nota},
-          where: 'NOT_ID = ?',
-          whereArgs: [notasAntigas.first['NOT_ID']],
-        );
-      } else {
+        // Cria Nova Nota
         await txn.insert('NOTAS', {
           'NOT_NOTA': nota,
           'FK_ALUNOS_ALU_ID': alunoId,
           'FK_MATERIAS_MAT_ID': materiaId,
           'FK_PROVAS_PRO_ID': provaId,
+          'NOT_CAMINHO_IMAGEM': caminhoImagem,
+          'NOT_CAMINHO_CORRIGIDA': caminhoImagemCorrigida,
+        });
+      }
+
+      // 3. Salva Respostas Individuais
+      for (var entry in respostasAluno.entries) {
+        await txn.insert('RESPOSTAS_ALUNOS', {
+          'FK_PROVAS_PRO_ID': provaId,
+          'RES_NUMERO_QUESTAO': entry.key,
+          'RES_RESPOSTA': entry.value,
         });
       }
     });
