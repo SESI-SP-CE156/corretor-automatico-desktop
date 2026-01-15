@@ -119,7 +119,7 @@ class PythonService {
 
     // Aguarda o Python imprimir "READY" (timeout de 30s para carregar libs pesadas)
     try {
-      await _workerReadyCompleter!.future.timeout(const Duration(seconds: 40));
+      await _workerReadyCompleter!.future.timeout(const Duration(seconds: 300));
     } catch (e) {
       throw Exception("Tempo limite excedido ao iniciar IA. Verifique logs.");
     }
@@ -392,7 +392,7 @@ class PythonService {
 
       // Aguarda resposta
       final result = await _currentTaskCompleter!.future.timeout(
-        const Duration(seconds: 20),
+        const Duration(seconds: 60),
         onTimeout: () {
           debugPrint("[Dart] TIMEOUT aguardando resposta do Python.");
           return {"sucesso": false, "erro": "Timeout na correção"};
