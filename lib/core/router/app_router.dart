@@ -5,6 +5,7 @@ import 'package:corretor_desktop/core/ui/scaffold_with_rail.dart';
 import 'package:corretor_desktop/core/ui/screens/python_setup_screen.dart';
 import 'package:corretor_desktop/features/alunos/alunos_create_screen.dart';
 import 'package:corretor_desktop/features/alunos/alunos_list_screen.dart';
+import 'package:corretor_desktop/features/correcoes/correcoes_details_screen.dart';
 import 'package:corretor_desktop/features/correcoes/correcoes_list_screen.dart';
 import 'package:corretor_desktop/features/correcoes/correcoes_review_screen.dart';
 import 'package:corretor_desktop/features/correcoes/correcoes_scanner_screen.dart';
@@ -121,6 +122,15 @@ final GoRouter appRouter = GoRouter(
                   paginas: paginas,
                   turmaId: turmaId,
                 );
+              },
+            ),
+
+            GoRoute(
+              path:
+                  'details/:id', // Note: 'details/:id' is relative to /correcoes
+              builder: (context, state) {
+                final id = state.pathParameters['id']!;
+                return CorrecoesDetailsScreen(gabaritoId: id);
               },
             ),
           ],

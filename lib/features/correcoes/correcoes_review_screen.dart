@@ -150,6 +150,10 @@ class _CorrecoesReviewScreenState extends State<CorrecoesReviewScreen> {
         alunoId: _selectedAluno!.id!,
         gabaritoId: widget.gabarito.id!,
         nota: _nota,
+        respostasAluno: _respostasAluno,
+        caminhoImagem: widget.paginas[_currentIndex].path, // Original Split
+        caminhoImagemCorrigida:
+            _imagemExibida!.path, // Corrected (Python Output)
       );
 
       // --- CORREÇÃO DO CRASH ---
