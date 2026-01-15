@@ -31,7 +31,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 9,
+      version: 10,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
       onConfigure: (db) async {
@@ -112,6 +112,7 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE ALTERNATIVAS_GABARITO (
         ALG_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+        ALG_NUMERO_QUESTAO INTEGER,
         FK_GABARITOS_GAB_ID INTEGER,
         FK_ALTERNATIVAS_ALT_ID INTEGER,
         FOREIGN KEY (FK_GABARITOS_GAB_ID) REFERENCES GABARITOS (GAB_ID) ON DELETE CASCADE, 
@@ -337,6 +338,20 @@ class DatabaseHelper {
       // 6. Religa a verificação. Como a tabela nova tem o mesmo nome "FOLHAS_MODELO"
       // e os mesmos IDs primários, as referências órfãs voltam a ser válidas.
       await db.execute('PRAGMA foreign_keys = ON');
+    }
+
+    if (oldVersion < 10) {
+      print(
+        'Migração v10: Adicionando número da questão em ALTERNATIVAS_GABARITO...',
+      );
+      // Adiciona a coluna
+      await db.execute(
+        'ALTER TABLE ALTERNATIVAS_GABARITO ADD COLUMN ALG_NUMERO_QUESTAO INTEGER',
+      );
+
+      // Tenta migrar dados antigos assumindo ordem sequencial (ALG_ID)
+      // Como o SQLite antigo é limitado, faremos uma lógica simples:
+      // Dados antigos continuarão com NULL e trataremos isso no código (fallback para índice sequencial)
     }
   }
 

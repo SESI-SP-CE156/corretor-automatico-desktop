@@ -13,7 +13,7 @@ try:
 except Exception:
     pass
 
-# Suprimir logs TF para manter o STDOUT limpo para comunicação JSON
+# Suprimir logs TF
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
 from tensorflow.keras.models import load_model
@@ -27,63 +27,42 @@ PADRAO_H = 800
 OFFSET_YOLO_X = 20
 OFFSET_YOLO_Y = 21
 
-# --- GLOBAIS (Estado Persistente) ---
+# Globais
 model_omr = None
 model_yolo = None
 labels_map = None
 limites_colunas_detectados = {}
-current_model_paths = {} # Para verificar se os caminhos mudaram
 
 def carregar_modelos(paths):
-    """
-    Carrega os modelos apenas se ainda não estiverem na memória
-    ou se os caminhos mudaram.
-    """
-    global model_omr, model_yolo, labels_map, current_model_paths
+    global model_omr, model_yolo, labels_map
     
-    # 1. Carregar Labels
     path_labels = paths.get("labels")
-    if path_labels and (labels_map is None or path_labels != current_model_paths.get("labels")):
-        if os.path.exists(path_labels):
-            try:
-                with open(path_labels, 'r') as f:
-                    raw_labels = json.load(f)
-                labels_map = {str(k): v for k, v in raw_labels.items()}
-                # Log via stderr para não sujar o canal de comunicação json
-                sys.stderr.write(f"[INFO] Labels carregados: {len(labels_map)} itens\n")
-                current_model_paths["labels"] = path_labels
-            except Exception as e:
-                sys.stderr.write(f"[ERRO] Falha ao ler labels: {e}\n")
-                labels_map = None
+    if path_labels and os.path.exists(path_labels):
+        try:
+            with open(path_labels, 'r') as f:
+                raw_labels = json.load(f)
+            labels_map = {str(k): v for k, v in raw_labels.items()}
+            sys.stderr.write(f"[INFO] Labels carregados: {labels_map}\n")
+        except Exception as e:
+            sys.stderr.write(f"[ERRO] Falha ao ler labels: {e}\n")
+            labels_map = None
     
     if labels_map is None:
         labels_map = {"0": "A", "1": "B", "2": "C", "3": "D", "4": "E", "5": "NENHUMA"}
 
-    # 2. Carregar Modelo OMR (Keras)
     path_omr = paths.get("omr")
-    if path_omr and (model_omr is None or path_omr != current_model_paths.get("omr")):
-        if os.path.exists(path_omr):
-            try:
-                # Limpa sessão anterior se necessário (opcional, mas bom pra memória)
-                if model_omr is not None:
-                    del model_omr
-                    tf.keras.backend.clear_session()
-                
-                model_omr = load_model(path_omr)
-                sys.stderr.write("[INFO] Modelo OMR Keras carregado.\n")
-                current_model_paths["omr"] = path_omr
-            except Exception as e:
-                sys.stderr.write(f"[ERRO] Falha ao carregar modelo Keras: {e}\n")
-                model_omr = None
+    if model_omr is None and path_omr and os.path.exists(path_omr):
+        try:
+            model_omr = load_model(path_omr)
+            sys.stderr.write("[INFO] Modelo OMR Keras carregado.\n")
+        except Exception as e:
+            sys.stderr.write(f"[ERRO] Falha ao carregar modelo Keras: {e}\n")
+            model_omr = None
 
-    # 3. Carregar YOLO
     path_yolo = paths.get("yolo")
-    if path_yolo and (model_yolo is None or path_yolo != current_model_paths.get("yolo")):
-        if os.path.exists(path_yolo):
-            sys.stderr.write(f"[INFO] Carregando YOLO de: {path_yolo}\n")
-            # YOLO da ultralytics gerencia sua própria memória bem
-            model_yolo = YOLO(path_yolo)
-            current_model_paths["yolo"] = path_yolo
+    if model_yolo is None and path_yolo and os.path.exists(path_yolo):
+        sys.stderr.write(f"[INFO] Carregando YOLO de: {path_yolo}\n")
+        model_yolo = YOLO(path_yolo)
 
 def aplicar_configuracao_inteligente(layout_config, gabarito_correto):
     total = layout_config.get('total_questoes')
@@ -99,10 +78,12 @@ def aplicar_configuracao_inteligente(layout_config, gabarito_correto):
         if 'questoes_por_coluna' not in layout_config: layout_config['questoes_por_coluna'] = 14
         if 'espaco_h_bolha' not in layout_config: layout_config['espaco_h_bolha'] = 32 
         if 'espaco_v_bolha' not in layout_config: layout_config['espaco_v_bolha'] = 27
+        sys.stderr.write("[INFO] PRESET: 28 QUESTÕES\n")
     elif total == 32:
         if 'questoes_por_coluna' not in layout_config: layout_config['questoes_por_coluna'] = 16
         if 'espaco_h_bolha' not in layout_config: layout_config['espaco_h_bolha'] = 28
         if 'espaco_v_bolha' not in layout_config: layout_config['espaco_v_bolha'] = 26
+        sys.stderr.write("[INFO] PRESET: 32 QUESTÕES\n")
     else:
         if 'questoes_por_coluna' not in layout_config: layout_config['questoes_por_coluna'] = 15
         if 'espaco_h_bolha' not in layout_config: layout_config['espaco_h_bolha'] = 30
@@ -129,12 +110,15 @@ def atualizar_layout_com_yolo(img_clean, layout_atual, img_debug=None):
                     boxes_questoes.append((x1, y1, x2, y2))
         
         if not boxes_questoes:
-            # sys.stderr.write("[WARN] YOLO: Nenhuma coluna detectada. Usando layout fixo.\n")
+            sys.stderr.write("[WARN] YOLO: Nenhuma coluna detectada. Usando layout fixo.\n")
             return layout_atual
 
         boxes_questoes.sort(key=lambda b: b[0])
         soma_alturas = 0
         qtd_colunas_detectadas = 0
+
+        # Não desenha mais caixas azuis no modo final, apenas usa para cálculo
+        # if img_debug is not None: ...
 
         if len(boxes_questoes) >= 1:
             x1, y1, x2, y2 = boxes_questoes[0]
@@ -156,6 +140,7 @@ def atualizar_layout_com_yolo(img_clean, layout_atual, img_debug=None):
             if q_por_col > 0:
                 novo_espaco_v = (altura_media / q_por_col) * 0.98
                 layout_atual['espaco_v_bolha'] = novo_espaco_v
+                sys.stderr.write(f"[INFO] YOLO: Espaçamento ajustado para {novo_espaco_v:.2f}px\n")
 
         return layout_atual
 
@@ -232,20 +217,17 @@ def ler_por_pixel_count(crop_thresh, num_opcoes=5):
     return "5"
 
 def processar_prova(imagem_path, layout_config, gabarito_correto, model_paths):
-    # Carregamento inteligente (só carrega se necessário)
     carregar_modelos(model_paths)
     
-    if not os.path.exists(imagem_path):
-         return {"sucesso": False, "erro": f"Arquivo não encontrado: {imagem_path}"}
-
     img_array = np.fromfile(imagem_path, np.uint8)
     img_orig = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-    if img_orig is None: return {"sucesso": False, "erro": "Falha ao ler imagem (formato inválido ou corrompido)"}
+    if img_orig is None: return {"sucesso": False, "erro": "Falha ao ler imagem"}
 
     planificada = cv2.resize(img_orig, (PADRAO_W, PADRAO_H), interpolation=cv2.INTER_AREA)
-    img_out = planificada.copy() 
+    img_out = planificada.copy() # Imagem para desenho limpa (sem caixas de debug)
 
     layout_config = aplicar_configuracao_inteligente(layout_config, gabarito_correto)
+    # Passamos None para img_debug no update layout para NÃO desenhar caixas de debug na img final
     layout_config = atualizar_layout_com_yolo(planificada, layout_config, img_debug=None)
 
     gray = cv2.cvtColor(planificada, cv2.COLOR_BGR2GRAY)
@@ -259,6 +241,7 @@ def processar_prova(imagem_path, layout_config, gabarito_correto, model_paths):
 
     for q_num in range(1, total_questoes + 1):
         crop, coords = _get_crop_para_questao(thresh, q_num, layout_config)
+        # Não desenhamos mais retângulos laranjas aqui (modo produção)
 
         if crop is not None and crop.size > 0 and crop.shape[0] > 5 and crop.shape[1] > 5:
             try:
@@ -288,14 +271,16 @@ def processar_prova(imagem_path, layout_config, gabarito_correto, model_paths):
                 respostas_detectadas[str(q_num)] = letra
         except Exception as e:
             sys.stderr.write(f"[ERRO IA] {e}. Fallback Pixel Count.\n")
-            # Se IA falhar no meio do processo, fallback para pixel count nesse lote
-            usou_ia = False 
+            for i, idx_q in enumerate(mapa_indices):
+                crop, _ = _get_crop_para_questao(thresh, idx_q, layout_config)
+                if crop is not None:
+                    idx_pixel = ler_por_pixel_count(crop)
+                    letra = labels_map.get(idx_pixel, "VAZIO")
+                    if letra == "NENHUMA": letra = "VAZIO"
+                    respostas_detectadas[str(idx_q)] = letra
 
-    # Fallback se não usou IA ou se falhou
-    if not usou_ia:
-        # Re-processar as questões que estavam no batch via pixel count
-         for i, q_num in enumerate(mapa_indices):
-            # Recorta novamente pois não guardamos o crop original, apenas o processado
+    if not usou_ia and not respostas_detectadas:
+         for q_num in mapa_indices:
             crop, _ = _get_crop_para_questao(thresh, q_num, layout_config)
             if crop is not None:
                 idx_pixel = ler_por_pixel_count(crop)
@@ -303,12 +288,13 @@ def processar_prova(imagem_path, layout_config, gabarito_correto, model_paths):
                 if letra == "NENHUMA": letra = "VAZIO"
                 respostas_detectadas[str(q_num)] = letra
 
-    # --- DESENHO DO FEEDBACK ---
+    # --- DESENHO DO FEEDBACK (ANÉIS) ---
     letras = ["A", "B", "C", "D", "E"]
     
     for q_num_str, letra_aluno in respostas_detectadas.items():
         q_num = int(q_num_str)
         
+        # Recupera dados de posição
         q_por_col = layout_config.get('questoes_por_coluna', 15)
         espaco_h = layout_config.get('espaco_h_bolha', 28)
         espaco_v = layout_config.get('espaco_v_bolha', 26)
@@ -320,26 +306,35 @@ def processar_prova(imagem_path, layout_config, gabarito_correto, model_paths):
             ox, oy = origens[col_idx]
             y_pos = int(oy + (q_idx * espaco_v))
             
+            # Gabarito oficial para esta questão
             letra_gabarito = gabarito_correto.get(str(q_num)) if gabarito_correto else None
             
+            # Lógica de Cor e Desenho
+            
+            # 1. Se aluno respondeu (A-E)
             if letra_aluno in letras:
                 l_idx = letras.index(letra_aluno)
                 x_pos = int(ox + (l_idx * espaco_h))
                 
                 if letra_gabarito:
                     if letra_aluno == letra_gabarito:
-                        cv2.circle(img_out, (x_pos, y_pos), 10, (0, 255, 0), 2)
+                        # Acertou: Anel Verde
+                        cv2.circle(img_out, (x_pos, y_pos), 10, (0, 255, 0), 2) # Thickness 2 = Anel
                         acertos += 1
                     else:
+                        # Errou: Anel Vermelho na marcada
                         cv2.circle(img_out, (x_pos, y_pos), 10, (0, 0, 255), 2)
                 else:
+                    # Sem gabarito: Apenas marca o que leu em Vermelho (ou outra cor neutra se preferir)
                     cv2.circle(img_out, (x_pos, y_pos), 10, (0, 0, 255), 2)
 
+            # 2. Se errou ou não respondeu, mostrar qual era a certa (Anel Azul)
             if letra_gabarito and letra_gabarito in letras:
                 if letra_aluno != letra_gabarito:
+                    # Desenha anel azul na correta
                     l_idx_gab = letras.index(letra_gabarito)
                     x_pos_gab = int(ox + (l_idx_gab * espaco_h))
-                    cv2.circle(img_out, (x_pos_gab, y_pos), 10, (255, 0, 0), 2)
+                    cv2.circle(img_out, (x_pos_gab, y_pos), 10, (255, 0, 0), 2) # Azul (BGR)
 
     out_path = os.path.join(os.path.dirname(imagem_path), f"checked_{os.path.basename(imagem_path)}")
     cv2.imwrite(out_path, img_out)
@@ -352,62 +347,12 @@ def processar_prova(imagem_path, layout_config, gabarito_correto, model_paths):
         "total_questoes": total_questoes
     }
 
-def main():
-    # Aviso inicial para o Flutter saber que o processo subiu e as bibliotecas foram importadas
-    # Nota: Os modelos ainda não estão carregados, pois dependem dos caminhos enviados no JSON.
-    # O carregamento real ocorrerá na primeira requisição.
-    print("READY")
-    sys.stdout.flush()
-
-    while True:
-        try:
-            # Lê uma linha do stdin (aguarda até chegar)
-            line = sys.stdin.readline()
-            
-            # Se receber string vazia, significa EOF (Flutter fechou o pipe), então encerra.
-            if not line:
-                break
-            
-            # Limpa espaços em branco extras
-            line = line.strip()
-            if not line:
-                continue
-
-            try:
-                dados = json.loads(line)
-                
-                # Executa o processamento
-                res = processar_prova(
-                    dados["caminho_imagem"], 
-                    dados["layout_config"], 
-                    dados["gabarito"], 
-                    dados.get("model_paths", {})
-                )
-                
-                # Retorna resultado em JSON (uma linha)
-                print(json.dumps(res))
-                sys.stdout.flush()
-
-            except json.JSONDecodeError:
-                err = json.dumps({"sucesso": False, "erro": "JSON inválido recebido no Python"})
-                print(err)
-                sys.stdout.flush()
-            except Exception as e:
-                # Captura erros de lógica interna para não derrubar o worker
-                err = json.dumps({
-                    "sucesso": False, 
-                    "erro": str(e), 
-                    "trace": traceback.format_exc()
-                })
-                print(err)
-                sys.stdout.flush()
-
-        except KeyboardInterrupt:
-            break
-        except Exception as e:
-            # Erro catastrófico de I/O
-            sys.stderr.write(f"Critical Worker Error: {e}\n")
-            break
-
 if __name__ == "__main__":
-    main()
+    try:
+        input_data = sys.stdin.read()
+        if not input_data: sys.exit(1)
+        dados = json.loads(input_data)
+        res = processar_prova(dados["caminho_imagem"], dados["layout_config"], dados["gabarito"], dados.get("model_paths", {}))
+        print(json.dumps(res))
+    except Exception as e:
+        print(json.dumps({"sucesso": False, "erro": str(e), "trace": traceback.format_exc()}))

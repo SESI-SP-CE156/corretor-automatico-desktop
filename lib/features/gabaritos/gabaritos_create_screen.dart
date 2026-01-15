@@ -37,7 +37,7 @@ class _GabaritosCreateScreenState extends State<GabaritosCreateScreen> {
   int? _selectedAnoId; // ID do ano único selecionado
   String? _selectedMateriaId;
 
-  final Map<int, String> _respostas = {};
+  final Map<int, List<String>> _respostas = {};
 
   bool _isLoading = true;
   bool _isSaving = false;
@@ -92,10 +92,17 @@ class _GabaritosCreateScreenState extends State<GabaritosCreateScreen> {
 
   void _toggleResposta(int questao, String letra) {
     setState(() {
-      if (_respostas[questao] == letra) {
-        _respostas.remove(questao);
+      if (!_respostas.containsKey(questao)) {
+        _respostas[questao] = [];
+      }
+
+      if (_respostas[questao]!.contains(letra)) {
+        _respostas[questao]!.remove(letra);
+        if (_respostas[questao]!.isEmpty) {
+          _respostas.remove(questao);
+        }
       } else {
-        _respostas[questao] = letra;
+        _respostas[questao]!.add(letra);
       }
     });
   }
@@ -139,6 +146,7 @@ class _GabaritosCreateScreenState extends State<GabaritosCreateScreen> {
     }
 
     final qtd = int.tryParse(_qtdController.text) ?? 0;
+
     if (_respostas.length != qtd) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Preencha todas as $qtd questões.")),
@@ -508,6 +516,9 @@ class _GabaritosCreateScreenState extends State<GabaritosCreateScreen> {
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (context, index) {
         final questao = index + 1;
+
+        final respostasSelecionadas = _respostas[questao] ?? [];
+
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 4.0),
           child: Row(
@@ -523,9 +534,10 @@ class _GabaritosCreateScreenState extends State<GabaritosCreateScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: ['A', 'B', 'C', 'D', 'E'].map((letra) {
-                    final isSelected = _respostas[questao] == letra;
+                    final isSelected = respostasSelecionadas.contains(letra);
                     return InkWell(
                       onTap: () => _toggleResposta(questao, letra),
+                      borderRadius: BorderRadius.circular(16),
                       child: Container(
                         width: 32,
                         height: 32,

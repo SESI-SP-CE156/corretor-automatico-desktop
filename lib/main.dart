@@ -11,19 +11,19 @@ import 'package:window_manager/window_manager.dart';
 Future<void> main() async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
+    await windowManager.ensureInitialized();
+
     pdfrxFlutterInitialize();
 
     WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
     FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
-
-    await windowManager.ensureInitialized();
 
     WindowOptions windowOptions = const WindowOptions(
       center: true,
       skipTaskbar: false,
       title: 'Corretor Automático SESI',
       size: Size(1280, 720),
-      minimumSize: Size(800, 600),
+      minimumSize: Size(1024, 768),
     );
 
     await windowManager.waitUntilReadyToShow(windowOptions, () async {

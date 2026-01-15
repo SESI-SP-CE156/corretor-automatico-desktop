@@ -86,11 +86,11 @@ class CorrecaoService {
   }
 
   /// 3. Buscar o Gabarito Oficial
-  Future<Map<int, String>> getGabaritoOficial(int gabaritoId) async {
+  Future<Map<int, List<String>>> getGabaritoOficial(int gabaritoId) async {
     final db = await _db;
     final result = await db.rawQuery(
       '''
-      SELECT ALT.ALT_ALTERNATIVA
+      SELECT AG.ALG_NUMERO_QUESTAO, ALT.ALT_ALTERNATIVA
       FROM ALTERNATIVAS_GABARITO AG
       INNER JOIN ALTERNATIVAS ALT ON AG.FK_ALTERNATIVAS_ALT_ID = ALT.ALT_ID
       WHERE AG.FK_GABARITOS_GAB_ID = ?
@@ -99,10 +99,26 @@ class CorrecaoService {
       [gabaritoId],
     );
 
-    final Map<int, String> mapa = {};
-    for (int i = 0; i < result.length; i++) {
-      mapa[i + 1] = result[i]['ALT_ALTERNATIVA'] as String;
+    final Map<int, List<String>> mapa = {};
+
+    int legacyCounter = 1;
+
+    for (var row in result) {
+      int questao;
+      if (row['ALG_NUMERO_QUESTAO'] != null) {
+        questao = row['ALG_NUMERO_QUESTAO'] as int;
+      } else {
+        questao = legacyCounter++;
+      }
+
+      final letra = row['ALT_ALTERNATIVA'] as String;
+
+      if (!mapa.containsKey(questao)) {
+        mapa[questao] = [];
+      }
+      mapa[questao]!.add(letra);
     }
+
     return mapa;
   }
 
@@ -245,12 +261,17 @@ class CorrecaoService {
     required int qtdQuestoes,
   }) async {
     // 1. Busca gabarito oficial (Int -> String)
-    final gabaritoOficialMapInt = await getGabaritoOficial(gabaritoId);
+    final gabaritoOficial = await getGabaritoOficial(gabaritoId);
 
-    // Converte para (String -> String) para o JSON
-    final Map<String, String> gabaritoPayload = gabaritoOficialMapInt.map(
-      (key, value) => MapEntry(key.toString(), value),
-    );
+    // Converte para formato compatível com Python
+    // OBS: Se o script Python esperar String ("A") e receber List ["A", "C"], pode falhar na comparação interna dele.
+    // Estratégia: Enviamos apenas a PRIMEIRA resposta válida para o Python fazer a detecção visual.
+    // O cálculo real de nota (considerando múltiplas) faremos aqui no Dart logo abaixo.
+    final Map<String, String> gabaritoPayloadPython = {};
+
+    gabaritoOficial.forEach((k, v) {
+      if (v.isNotEmpty) gabaritoPayloadPython[k.toString()] = v[0];
+    });
 
     // 2. Busca Layout Config do Banco
     final layoutConfig = await _getLayoutConfig(gabaritoId);
@@ -259,38 +280,43 @@ class CorrecaoService {
     final resultadoPython = await _python.corrigirProva(
       imagePath: imagem.path,
       layoutConfig: layoutConfig,
-      gabarito: gabaritoPayload,
+      gabarito: gabaritoPayloadPython,
     );
 
     if (resultadoPython['sucesso'] == true) {
-      // O Python retorna as chaves como Strings ("1", "2"), convertemos para int
       final respostasRaw =
           resultadoPython['respostas_detectadas'] as Map<String, dynamic>;
-      final Map<int, String> respostasFormatadas = {};
+      final Map<int, String> respostasDetectadas = {};
 
       respostasRaw.forEach((k, v) {
         final keyInt = int.tryParse(k);
         if (keyInt != null) {
-          respostasFormatadas[keyInt] = v.toString();
+          respostasDetectadas[keyInt] = v.toString();
         }
       });
 
-      final int acertos = resultadoPython['acertos'] as int;
+      // 4. RECALCULAR ACERTOS NO DART (Para suportar múltiplas respostas)
+      // Ignoramos o 'acertos' do Python pois ele só checou a primeira opção.
+      int acertosReais = 0;
+      respostasDetectadas.forEach((questao, respostaAluno) {
+        if (gabaritoOficial.containsKey(questao)) {
+          // Se a resposta do aluno estiver na lista de aceitas
+          if (gabaritoOficial[questao]!.contains(respostaAluno)) {
+            acertosReais++;
+          }
+        }
+      });
 
-      // 4. Calcula Nota usando a lógica do Flutter
-      final double notaCalculada = await calcularNota(gabaritoId, acertos);
+      final double notaCalculada = await calcularNota(gabaritoId, acertosReais);
 
       return {
-        'respostas': respostasFormatadas,
+        'respostas': respostasDetectadas,
         'imagem': File(resultadoPython['caminho_imagem_corrigida']),
-        'acertos': acertos,
+        'acertos': acertosReais, // Usa o nosso cálculo
         'nota': notaCalculada,
       };
     } else {
-      throw Exception(
-        resultadoPython['erro'] ??
-            "Erro desconhecido ao processar prova via Python.",
-      );
+      throw Exception(resultadoPython['erro']);
     }
   }
 }

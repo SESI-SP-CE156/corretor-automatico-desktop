@@ -94,9 +94,9 @@ class GabaritosRepository {
     required String nome,
     required String materiaId,
     required int folhaId,
-    required int anoId, // <--- Novo Parâmetro
+    required int anoId,
     required int qtdQuestoes,
-    required Map<int, String> respostas,
+    required Map<int, List<String>> respostas,
     required List<RegraNota> regras,
   }) async {
     final db = await _db;
@@ -107,24 +107,27 @@ class GabaritosRepository {
       final gabId = await txn.insert('GABARITOS', {
         'GAB_NOME': nome,
         'GAB_QUANTIDADE_PERGUNTAS': qtdQuestoes,
-        'FK_MATERIAS_MAT_ID': materiaId, // Matéria registrada aqui
+        'FK_MATERIAS_MAT_ID': materiaId,
         'FK_FOLHAS_MODELO_FOM_ID': folhaId,
         'FK_ANOS_ANO_ID': anoId,
       });
 
       for (int i = 1; i <= qtdQuestoes; i++) {
-        final letra = respostas[i];
-        if (letra != null) {
-          final altResult = await txn.query(
-            'ALTERNATIVAS',
-            where: 'ALT_ALTERNATIVA = ?',
-            whereArgs: [letra],
-          );
-          if (altResult.isNotEmpty) {
-            await txn.insert('ALTERNATIVAS_GABARITO', {
-              'FK_GABARITOS_GAB_ID': gabId,
-              'FK_ALTERNATIVAS_ALT_ID': altResult.first['ALT_ID'],
-            });
+        final letras = respostas[i]; // Agora é uma lista
+        if (letras != null && letras.isNotEmpty) {
+          for (final letra in letras) {
+            final altResult = await txn.query(
+              'ALTERNATIVAS',
+              where: 'ALT_ALTERNATIVA = ?',
+              whereArgs: [letra],
+            );
+            if (altResult.isNotEmpty) {
+              await txn.insert('ALTERNATIVAS_GABARITO', {
+                'FK_GABARITOS_GAB_ID': gabId,
+                'FK_ALTERNATIVAS_ALT_ID': altResult.first['ALT_ID'],
+                'ALG_NUMERO_QUESTAO': i, // <--- SALVA O NÚMERO
+              });
+            }
           }
         }
       }
@@ -134,7 +137,7 @@ class GabaritosRepository {
           'RNO_INICIO': regra.inicio,
           'RNO_FIM': regra.fim,
           'RNO_NOTA': regra.nota,
-          'FK_GABARITOS_GAB_ID': gabId, // Vinculado ao Gabarito
+          'FK_GABARITOS_GAB_ID': gabId,
         });
       }
     });
