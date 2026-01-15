@@ -28,7 +28,7 @@ class _CorrecoesReviewScreenState extends State<CorrecoesReviewScreen> {
   final _service = CorrecaoService();
 
   List<Aluno> _alunos = [];
-  Map<int, String> _gabaritoOficial = {};
+  Map<int, List<String>> _gabaritoOficial = {};
 
   // --- NOVA LISTA: Mantém IDs dos alunos já processados nesta sessão ---
   final List<int> _alunosJaCorrigidos = [];
@@ -109,7 +109,10 @@ class _CorrecoesReviewScreenState extends State<CorrecoesReviewScreen> {
   void _recalcularNotaLocal() async {
     int contaAcertos = 0;
     _respostasAluno.forEach((q, letra) {
-      if (_gabaritoOficial[q] == letra) contaAcertos++;
+      // Verifica se a letra do aluno está na lista de corretas
+      if (_gabaritoOficial[q] != null && _gabaritoOficial[q]!.contains(letra)) {
+        contaAcertos++;
+      }
     });
 
     final notaCalc = await _service.calcularNota(
@@ -265,10 +268,11 @@ class _CorrecoesReviewScreenState extends State<CorrecoesReviewScreen> {
                     separatorBuilder: (_, __) => const Divider(height: 8),
                     itemBuilder: (context, index) {
                       final q = index + 1;
-                      final correta = _gabaritoOficial[q];
+                      final corretas = _gabaritoOficial[q] ?? [];
                       final marcada = _respostasAluno[q];
-                      final isAcerto = marcada != null && marcada == correta;
 
+                      final isAcerto =
+                          marcada != null && corretas.contains(marcada);
                       return Row(
                         children: [
                           SizedBox(
@@ -290,11 +294,16 @@ class _CorrecoesReviewScreenState extends State<CorrecoesReviewScreen> {
                               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                               children: ['A', 'B', 'C', 'D', 'E'].map((letra) {
                                 final isSelected = marcada == letra;
-                                Color bg = isSelected
-                                    ? (letra == correta
-                                          ? Colors.green
-                                          : Colors.red)
-                                    : Colors.white;
+                                final isGabarito = corretas.contains(letra);
+
+                                Color bg = Colors.white;
+                                if (isSelected) {
+                                  bg = isAcerto ? Colors.green : Colors.red;
+                                } else if (isGabarito) {
+                                  // Mostra visualmente quais eram as corretas (borda ou fundo suave)
+                                  bg = Colors.green.shade50;
+                                }
+
                                 Color textC = isSelected
                                     ? Colors.white
                                     : Colors.black;
@@ -307,7 +316,10 @@ class _CorrecoesReviewScreenState extends State<CorrecoesReviewScreen> {
                                       shape: BoxShape.circle,
                                       color: bg,
                                       border: Border.all(
-                                        color: Colors.grey.shade400,
+                                        color: isGabarito
+                                            ? Colors.green
+                                            : Colors.grey.shade400,
+                                        width: isGabarito ? 2 : 1,
                                       ),
                                     ),
                                     child: Center(
