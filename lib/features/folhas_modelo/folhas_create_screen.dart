@@ -98,10 +98,11 @@ class _FolhasCreateScreenState extends State<FolhasCreateScreen> {
             _currentStep = SelectionStep.none;
           });
         } catch (e) {
-          if (mounted)
+          if (mounted) {
             ScaffoldMessenger.of(
               context,
             ).showSnackBar(SnackBar(content: Text("Erro: $e")));
+          }
         } finally {
           if (mounted) setState(() => _isSaving = false);
         }
@@ -290,10 +291,11 @@ class _FolhasCreateScreenState extends State<FolhasCreateScreen> {
         context.pop();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text("Erro: $e")));
+      }
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
