@@ -111,8 +111,9 @@ class _CorrecoesDetailsScreenState extends State<CorrecoesDetailsScreen>
       }
 
       final downloadsDir = await getDownloadsDirectory();
-      if (downloadsDir == null)
+      if (downloadsDir == null) {
         throw Exception("Pasta de downloads não encontrada.");
+      }
 
       // Gera nome apropriado
       final fileName = _generateFileName(

@@ -109,10 +109,11 @@ class _CorrecoesScannerScreenState extends State<CorrecoesScannerScreen> {
         },
       );
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Erro ao processar: $e')));
+      }
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }
