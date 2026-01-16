@@ -107,6 +107,7 @@ jobs:
           # Cria diretório de bibliotecas e copia o sqlite do sistema renomeando para o que o Dart espera
           mkdir -p AppDir/usr/lib
           cp /usr/lib/x86_64-linux-gnu/libsqlite3.so.0 AppDir/usr/lib/libsqlite3.so
+          cp /usr/lib/x86_64-linux-gnu/libsqlite3.so.0 AppDir/usr/lib/libsqlite3.so.0
 
           # Copia o bundle gerado pelo Flutter (inclui assets/python dentro de data/flutter_assets)
           cp -r build/linux/x64/release/bundle/* AppDir/
@@ -124,10 +125,21 @@ jobs:
           Comment=Corretor Automático de Provas
           EOF
 
-          # Link simbólico para execução
-          cd AppDir
-          ln -s corretor_desktop AppRun
-          cd ..
+          # 2. Criar script AppRun
+          cat > AppDir/AppRun <<EOF
+          #!/bin/sh
+
+          # Pega o diretório onde o AppImage está montado
+          HERE="\$(dirname "\$(readlink -f "\${0}")")"
+
+          # Adiciona a pasta interna usr/lib ao caminho de busca de bibliotecas
+          export LD_LIBRARY_PATH="\${HERE}/usr/lib:\$LD_LIBRARY_PATH"
+
+          # Executa o binário do Flutter
+          exec "\${HERE}/corretor_desktop" "\$@"
+          EOF
+
+          chmod +x AppDir/AppRun
 
           # Gera o AppImage
           wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
